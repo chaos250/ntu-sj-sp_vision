@@ -1,6 +1,7 @@
 #include <fmt/core.h>
 
 #include <chrono>
+#include <cmath>
 #include <nlohmann/json.hpp>
 #include <opencv2/opencv.hpp>
 #include <optional>
@@ -82,7 +83,12 @@ int main(int argc, char * argv[])
 
     solver.set_R_gimbal2world(q);
 
+    // 计时 YOLO 检测耗时（观察 CPU 推理是否跟得上相机帧率）
+    auto detect_start = std::chrono::steady_clock::now();
     auto armors = detector.detect(img);
+    auto detect_ms = std::chrono::duration<double, std::milli>(
+                       std::chrono::steady_clock::now() - detect_start)
+                       .count();
     tools::logger()->info("armors detected: {}", armors.size());
     auto targets = tracker.track(armors, t);
 
@@ -100,6 +106,32 @@ int main(int argc, char * argv[])
     command.yaw = plan.yaw;
     command.pitch = plan.pitch;
     command.tracking = plan.control;
+
+    // 发送调试数据到 PlotJuggler（UDP 9870，配合 buff_layout.xml / mpc_layout.xml 布局）
+    nlohmann::json plot_data;
+    plot_data["t"] =
+      std::chrono::duration<double>(t - std::chrono::steady_clock::time_point()).count();
+    // 视觉指令（Planner 输出，单位：度）
+    plot_data["cmd_yaw"] = plan.yaw * 180.0 / M_PI;
+    plot_data["cmd_pitch"] = plan.pitch * 180.0 / M_PI;
+    plot_data["control"] = plan.control;
+    plot_data["shoot"] = plan.fire;
+    // 电控姿态（0x5A 帧欧拉角，单位：度）
+    plot_data["mcu_yaw"] = cboard.getYaw() * 180.0 / M_PI;
+    plot_data["mcu_pitch"] = cboard.getPitch() * 180.0 / M_PI;
+    plot_data["mcu_roll"] = cboard.getRoll() * 180.0 / M_PI;
+    // 电控姿态四元数
+    plot_data["mcu_q_w"] = q.w();
+    plot_data["mcu_q_x"] = q.x();
+    plot_data["mcu_q_y"] = q.y();
+    plot_data["mcu_q_z"] = q.z();
+    // 目标角速度（rad/s，打符决策用的那个 w）
+    plot_data["target_w"] = target.has_value() ? target->ekf_x()[7] : 0.0;
+    // 串口链路质量（最近 5s CRC 通过率 %，窗口内无数据为 -1）
+    plot_data["crc_rate"] = cboard.crc_rate();
+    // 本帧 YOLO 检测耗时（ms）
+    plot_data["detect_ms"] = detect_ms;
+    plotter.plot(plot_data);
 
     cboard.send(command);
   }
