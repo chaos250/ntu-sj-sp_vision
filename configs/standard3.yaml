@@ -1,0 +1,165 @@
+enemy_color: "red"
+# enemy_color: "blue"
+
+#####-----神经网络参数-----#####
+yolo_name: yolov5
+classify_model: assets/tiny_resnet.onnx
+yolo11_model_path: assets/yolo11.xml
+yolov8_model_path: assets/yolov8.xml
+yolov5_model_path: assets/yolov5.xml
+device: CPU
+# 推理后端（XDU 上游 yolo.cpp 必读键）：openvino | tensorrt
+inference_backend: openvino
+# 推理模式：throughput(吞吐优先) / latency(单帧延迟优先)。
+# 延迟模式让单个请求独占资源，在 8 核 CPU 上实测 61ms/帧；吞吐模式+多流能到 ~20ms/帧。
+performance_mode: throughput
+# 并发推理流数 —— 这是帧率的主要旋钮。
+#
+# 实测（真实相机，整条 push/debug_pop 流水线）：
+#     流数   帧率       帧滞后
+#      3    19.6 fps   149 ms
+#      4    24.7 fps   152 ms
+#      5    30.3 fps   155 ms
+#      6    33.9 fps   159 ms
+#      8    38.2 fps   177 ms
+#     12    30.9 fps      -     <- 开始回落（CPU 超订）
+#
+# 注意：滞后对流数并不敏感（149->177ms）。流数翻倍会让排队的帧数变多，
+# 但每帧周期同步变短，两个效应基本抵消。所以不存在"帧率换滞后"的陡峭取舍。
+#
+# 真正卡住上限的是 commandgener.cpp 里的硬规则：帧龄超过 200ms 就丢弃该帧、
+# 改发停止指令（它用帧的采集时间戳判断）。所以 num_streams 的选择要让帧滞后
+# 留出足够裕量 —— 8 流均值 177ms，只剩 23ms，抖动一大就会断续丢指令。
+# 6 流 159ms 是更稳的默认（代价只有 4fps）；要榨帧率再往上调。
+#
+# 别用"丢掉最旧的在飞帧让新帧顶进来"去压滞后，试过，反而更差得多。
+num_streams: 6
+# 检测可视化窗口开关（draw+imshow 占用主循环，性能排查时可关；现场想看检测效果时开）
+debug_window: true
+min_confidence: 0.8
+use_traditional: true
+
+#####-----ROI-----#####
+roi: 
+  x: 420
+  y: 50
+  width: 600
+  height: 600
+
+use_roi: false
+
+#####-----传统方法参数-----#####
+threshold: 150
+max_angle_error: 45 # degree
+min_lightbar_ratio: 1.5
+max_lightbar_ratio: 20
+min_lightbar_length: 8
+min_armor_ratio: 1
+max_armor_ratio: 5
+max_side_ratio: 1.5
+max_rectangular_error: 25 # degree
+
+#####-----tracker参数-----#####
+min_detect_count: 5
+max_temp_lost_count: 15
+outpost_max_temp_lost_count: 75
+# 帧间隔上限(秒)，超过即判定目标丢失。缺省 0.1s，是按 ~100fps 的推理帧率设计的。
+# 本机 CPU 推理约 11fps(87ms/帧)，加上主循环开销实际帧间隔 0.12~0.3s，
+# 用 0.1 会导致每帧都被打成 lost、目标永远建立不起来。推理变快后可调回 0.1。
+max_dt: 0.3
+
+#####-----aimer参数-----#####
+# 常数瞄准偏置(所有距离一致)。19:54 实测(off_yaw=4.5):板在相机轴右
+# iy=+2.7°(1.5m)/+4.0°(0.65m),加 cx 主点偏右 1.03°,用户看到板偏右
+# 3.7~5°(即最初"偏右下"的右半)。yaw 链:aim 点≈板(19:32 已验),残差在
+# 相机轴对窗口中心 → off_yaw 提到 8.0,使 1.5m 处 iy≈-0.8、0.65m 处
+# +0.5(±2° 的 v̂ 预测噪声)。规则:板偏右→增大 yaw_offset。
+#
+# pitch: cmd=-(traj+off),电控执行与 q 帧符号相反(physical=+traj+off),
+# 弹速用 GimbalRx 回传的 15.0 算 drop(1.5m 处 1.77°)。19:54 实测验证的链:
+# ip(板相对相机轴,下为正) = drop(v0=15) + off - 7.28(相机下倾) + vz·dt 噪声
+# → off=5.0 时稳态 ip=-1.5~-0.5°(板≈窗口中心,1.54° 主点偏下已含)。
+# 实测均值 +1.2~3.0 是 vz·dt 预测噪声(手微动 ±2-3°),不是偏置,不要再动。
+# 规则:偏下→减小 pitch_offset,偏上→增大。
+yaw_offset: 0.5 # degree
+pitch_offset: 4.5 # degree
+comming_angle: 55 # degree
+leaving_angle: 20 # degree
+# 高/低速档位判定阈值（rad/s），按角速度绝对值判断（带符号会漏掉反向旋转的目标）。
+# 联调期两档延迟暂不区分，可先都设 0.1s。
+decision_speed: 3 # rad/s
+# 发弹延迟 + 云台响应时间。2026-10-18 近距抖动排查：0.1s 时预测时域达
+# 0.15~0.2s 帧龄 + 0.1s ≈ 0.3s，与假自转 w 相乘把指令甩出 ±25°；降到 0.03s
+# 并配合 max_predict_time 钳制，近距离（1m 弹道飞行 ~0.05s）仍有余量。
+high_speed_delay_time: 0.03 # s
+low_speed_delay_time: 0.03 # s
+# to_now 预测时域上限（秒），= 帧龄 + delay_time 的上限。近距假自转场景下
+# 预测越长指令摆幅越大；代价是帧龄超限时瞄准点略滞后。联调稳定后可放宽。
+# 17:20 测试再收紧 0.15→0.08：实测瞄准误差 ∝ w（w=0 时 +27°、w=1 时 +36°、
+# w=4 时 +55°），预测在用噪声踢过的 v̂/w 放大误差；0.08s 仍覆盖近距离
+# 弹道飞行 ~0.03s + 延迟 0.03s。
+max_predict_time: 0.15 # s  (0.08→0.15: 覆盖 帧龄~0.11s+延迟0.03s，预测追平"现在"；仍慢再试 0.18~0.20)
+# 电控帧内弹速无效（<14 m/s）时兜底使用的弹速，必须改成实际弹速（如 15/18/30）
+default_bullet_speed: 23.0
+
+#####-----shooter参数-----#####
+first_tolerance: 3 # 近距离射击容差，degree
+second_tolerance: 2 # 远距离射击容差，degree
+judge_distance: 2 #距离判断阈值
+# auto_fire: 首次全链路联调建议置 false —— 先确认跟踪/瞄准正确，
+# 再打开开火。只要锁定装甲板且误差 <2~3° 就会置 shoot 位。
+auto_fire: false # 是否由自瞄控制射击
+
+camera_name: "hikrobot"
+exposure_ms: 8.0
+gain: 14.0
+vid_pid: "2bdf:0001"
+
+#  1  0  0
+#  0  1  0
+#  0  0  1
+R_gimbal2imubody: [1, 0, 0, 0, 1, 0, 0, 0, 1]
+
+# 重投影误差: 0.1820px
+camera_matrix: [1785.4881526822305, 0, 672.4806478241826, 0, 1785.026019470562, 559.89603224794314, 0, 0, 1]
+distort_coeffs: [-0.076005079619881746, 0.11182817466388446, 0.0005362204787722057, -0.0027546300984895122, 0]
+
+# 相机同理想情况的偏角: yaw1.44 pitch-7.28 roll0.96 degree
+# 标定板到世界坐标系原点的水平距离: 1.13 m
+# 标定板同竖直摆放时的偏角: yaw7.61 pitch13.92 roll-0.46 degree
+R_camera2gimbal: [-0.027182119030230909, -0.12616154330853446, 0.99163723074269183, -0.99949106557517331, 0.019998323121329122, -0.024853106601381177, -0.016695575474690555, -0.99180811252093692, -0.12664093215554434]
+t_camera2gimbal: [0.13160669975045827, 0.10377721766577375, 0.024908271912914642]
+
+#####-----cboard参数-----#####
+quaternion_canid: 0x100
+bullet_speed_canid: 0x101
+send_canid: 0xff
+can_interface: "can0"
+
+#####-----gimbal参数-----#####
+com_port: "/dev/gimbal"
+# 实测当前 C 板固件的 crc16 字段匹配不上任何已知 CRC 算法（疑似未赋值），
+# 故联调期关闭校验，自动退化为单位四元数合理性检查。电控修好后改回 true。
+crc_check: true
+yaw_kp: 0
+yaw_kd: 0
+pitch_kp: 0
+pitch_kd: 0
+
+#####-----planner-----#####
+fire_thresh: 0.0035
+
+max_yaw_acc: 50
+Q_yaw: [9e6, 0]
+R_yaw: [1]
+
+max_pitch_acc: 100
+Q_pitch: [9e6, 0]
+R_pitch: [1]
+
+#####-----buff_detector参数-----#####
+model: "assets/yolo11_buff_int8.xml"
+
+#####-----buff_aimer参数-----#####
+fire_gap_time: 0.700   # s
+predict_time: 0.120     # s
