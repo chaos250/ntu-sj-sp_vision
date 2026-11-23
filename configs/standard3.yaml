@@ -10,6 +10,8 @@ yolov5_model_path: assets/yolov5.xml
 device: CPU
 # 推理后端（XDU 上游 yolo.cpp 必读键）：openvino | tensorrt
 inference_backend: openvino
+# 异步推理流水线开关（仅 yolo11 / trt 系列读取；yolov5 忽略）
+use_async_inference: true
 min_confidence: 0.8
 use_traditional: true
 
@@ -37,6 +39,9 @@ max_rectangular_error: 25 # degree
 min_detect_count: 5
 max_temp_lost_count: 15
 outpost_max_temp_lost_count: 75
+# 帧间隔上限(秒)，超过即判定目标丢失。缺省 0.1s，是按 ~100fps 推理帧率设计的；
+# 本机 CPU 推理约 11fps(87ms/帧)，帧间隔 0.12~0.3s，用 0.1 会导致目标频繁被打成 lost。
+max_dt: 0.3
 
 #####-----aimer参数-----#####
 # 常数瞄准偏置(所有距离一致)。19:54 实测(off_yaw=4.5):板在相机轴右

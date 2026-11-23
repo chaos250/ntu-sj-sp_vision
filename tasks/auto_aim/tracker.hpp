@@ -60,6 +60,7 @@ private:
   int temp_lost_count_;
   int outpost_max_temp_lost_count_;
   int normal_temp_lost_count_;
+  double max_dt_ = 0.1;  // 帧间隔上限(s)，超过即判定丢失；缺省 0.1，CPU 推理慢时用 yaml max_dt 调大
   std::string state_, pre_state_;
   Target target_;
   std::chrono::steady_clock::time_point last_timestamp_;
