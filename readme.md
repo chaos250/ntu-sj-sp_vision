@@ -101,7 +101,7 @@ IMU型号：使用C板内置BMI088作为IMU\
     ./build/auto_aim_test
     ```
 
-4. 注册自启：
+4. 注册自启（登录后 `autostart.sh` → `watchdog.sh` 守护拉起视觉程序）：
     1. 确保已安装`screen`:
         ```
         sudo apt install screen
@@ -111,18 +111,25 @@ IMU型号：使用C板内置BMI088作为IMU\
         mkdir ~/.config/autostart/
         touch ~/.config/autostart/sp_vision.desktop
         ```
-    3. 在该文件中写入:
+    3. 在该文件中写入（Exec 改为本仓库的实际绝对路径）:
         ```
         [Desktop Entry]
         Type=Application
-        Exec=/home/rm/Desktop/sp_vision_25/autostart.sh
+        Exec=/home/rm/Desktop/ntu-sj-sp_vision/autostart.sh
         Name=sp_vision
         ```
         注: [Exec](https://specifications.freedesktop.org/desktop-entry-spec/desktop-entry-spec-latest.html)必须为绝对路径.
-    4. 确保`autostart.sh`有可执行权限:
+    4. 确保脚本有可执行权限:
         ```
-        chmod +x autostart.sh
+        chmod +x autostart.sh watchdog.sh
         ```
+    5. `watchdog.sh` 默认拉起 `./build/standard1`（USB CDC 主程序）+ `configs/standard3.yaml`，
+       崩溃后自动重启（指数退避，上限 60s），日志在 `logs/watchdog.log`。
+       要改跑其他程序（如 XDU 的 `standard_mpc`），在 `autostart.sh` 里加：
+        ```
+        export VISION_BIN=./build/standard_mpc
+        ```
+       调试时可 `screen -r` 附加到自启会话看输出。
 
 5. USB2CAN设置（可选）
     1. 创建`.rules`文件:
